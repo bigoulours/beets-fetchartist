@@ -16,7 +16,7 @@ from beets import util as beetsutil
 from beetsplug import util
 
 CONTENT_TYPES = ["image/png", "image/jpeg"]
-FILE_TYPES = ['png', 'jpg']
+FILE_TYPES = ['png', 'jpg', 'jpeg']
 
 CONTENT_TYPE_TO_EXTENSION_MAP = {
     "image/png": "png",
@@ -123,7 +123,15 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
         else:
             template = self._default_template
 
-        evaluated_template = item.evaluate_template(template)
+        replacements = []
+        for pattern, repl in config['replace'].get(dict).items():
+            repl = repl or ''
+            replacements.append((re.compile(pattern), repl))
+
+        evaluated_template = beetsutil.sanitize_path(
+                                 item.evaluate_template(template, True),
+                                 replacements=replacements
+                             )
         cover_name = self._get_cover_name(item)
         path = os.path.join(evaluated_template, cover_name)
 
@@ -170,15 +178,33 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
 
         if not url:
             return None
+        print(f'Looking for cover at {url}')
 
-        headers = {"Accept-Language": "en-US, en;q=0.5"}
-        results = requests.get(url, headers=headers)
+        timed_out=True
+        for _ in range(3):
+            try:
+                #headers = {"Accept-Language": "en-US, en;q=0.5", "User-Agent": "Mozilla/5.0"}
+                headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/10.0"}
+                #headers = {}
+                results = requests.get(url, headers=headers, timeout=5)
+                if results.status_code != 200:
+                    continue
+                timed_out=False
+                break
+
+            except requests.exceptions.ReadTimeout:
+                continue
+
+        if timed_out:
+            print("Request timed out or response code != 200")
+            return None
 
         # cover art endpoint was removed so this parses the html
         soup = BeautifulSoup(results.text, "html.parser")
 
         # artist image will show up in this element
-        search = soup.find_all('div', class_='header-new-background-image')
+        search = soup.find_all('div', {'class': 'header-new-background-image'})
+
         if not search:
             return None
 
@@ -191,7 +217,23 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
         # this is a custom value that improves the image quality
         cover = cover.replace('/ar0/', '/770x0/')
         cover = cover.replace('.jpg', '.png')
-        response = requests.get(cover, stream=True)
+        print(f'{cover=}')
+
+        timed_out=True
+        for _ in range(3):
+            try:
+                response = requests.get(cover, stream=True, timeout=10)
+                if response.status_code != 200:
+                    continue
+                timed_out=False
+                break
+
+            except requests.exceptions.ReadTimeout:
+                continue
+
+        if timed_out:
+            print("Request timed out or response code != 200")
+            return None
 
         content_type = response.headers.get('Content-Type')
         if content_type is None or content_type not in CONTENT_TYPES:
@@ -202,6 +244,7 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
         return (response, extension)
 
     def _fetch_cover(self, artist_info):
+        print(f'\nFetching cover for {artist_info.name}...')
         result = self._request_cover(artist_info.name)
         if result is None:
             return False
