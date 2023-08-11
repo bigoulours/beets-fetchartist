@@ -183,9 +183,7 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
         timed_out=True
         for _ in range(3):
             try:
-                #headers = {"Accept-Language": "en-US, en;q=0.5", "User-Agent": "Mozilla/5.0"}
-                headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/10.0"}
-                #headers = {}
+                headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:10.0) Gecko/20100101 Firefox/10.0", 'Connection':'close'}
                 results = requests.get(url, headers=headers, timeout=5)
                 if results.status_code != 200:
                     continue
@@ -222,26 +220,26 @@ class FetchArtistPlugin(plugins.BeetsPlugin):
         timed_out=True
         for _ in range(3):
             try:
-                response = requests.get(cover, stream=True, timeout=10)
+                response = requests.get(cover, stream=True, timeout=12, headers={'Connection':'close'})
                 if response.status_code != 200:
                     continue
                 timed_out=False
-                break
+
+                content_type = response.headers.get('Content-Type')
+                if content_type is None or content_type not in CONTENT_TYPES:
+                    self._log.debug(u"not a supported image: {}", content_type or 'no content type')
+                    return None
+
+                extension = CONTENT_TYPE_TO_EXTENSION_MAP[content_type]
+                return (response, extension)
 
             except requests.exceptions.ReadTimeout:
                 continue
 
         if timed_out:
             print("Request timed out or response code != 200")
-            return None
 
-        content_type = response.headers.get('Content-Type')
-        if content_type is None or content_type not in CONTENT_TYPES:
-            self._log.debug(u"not a supported image: {}", content_type or 'no content type')
-            return None
-
-        extension = CONTENT_TYPE_TO_EXTENSION_MAP[content_type]
-        return (response, extension)
+        return None
 
     def _fetch_cover(self, artist_info):
         print(f'\nFetching cover for {artist_info.name}...')
